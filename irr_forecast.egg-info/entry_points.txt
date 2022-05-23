@@ -1,0 +1,7 @@
+
+        [console_scripts]
+        call-to-end = irr_forecast:call_to_end
+        get-coords = irr_forecast:get_coords
+        call-count = irr_forecast:check_call_count
+        schedule = irr_forecast:schedule
+    
