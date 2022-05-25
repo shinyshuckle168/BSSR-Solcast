@@ -1,6 +1,7 @@
-requests
+numpy
+pandas
 scipy
+matplotlib
+requests
 ratelimit
 click
-pandas
-numpy

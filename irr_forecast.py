@@ -1,4 +1,6 @@
-import requests, csv, time, scipy.stats as st, click, os, numpy as np, math
+import math, csv, time, os
+import numpy as np, scipy.stats as st, matplotlib.pyplot as plt
+import requests, click
 from ratelimit import limits
 
 # free trial
@@ -13,17 +15,29 @@ def distance(coord1, coord2):
     # calculates distance between two latitude-longitude coordinates using the Haversine formula
 
     # coordinates are strings of comma separated latitude and longitude 
-    lat1, long1 = [float(i) for i in coord1.split(",")]
-    lat2, long2 = [float(i) for i in coord2.split(",")]
+    lat1, long1 = [float(i)*math.pi/180 for i in coord1.split(",")]
+    lat2, long2 = [float(i)*math.pi/180 for i in coord2.split(",")]
 
     r = 6371
     a = (math.sin((lat2-lat1)/2))**2
     b = math.cos(lat1)*math.cos(lat2)*(math.sin((long2-long1)/2))**2
-    return 2*r*math.sin((a+b)**0.5)
+    return 2*r*math.asin((a+b)**0.5)
 
-def get_coords(folder):
+    # lat1, lon1 = [float(i) for i in coord1.split(",")]
+    # lat2, lon2 = [float(i) for i in coord2.split(",")]
+
+    # R = 6371e3;                 
+    # phi_1 = lat1 * math.pi/180      
+    # phi_2 = lat2 * math.pi/180
+    # delPhi = (lat2-lat1) * math.pi/180
+    # delLambda = (lon2-lon1) * math.pi/180
+    # a =  ( math.sin(delPhi/2) * math.sin(delPhi/2) ) + ( math.cos(phi_1) * math.cos(phi_2) * math.sin(delLambda/2) * math.sin(delLambda/2) )
+    # c = 2 * math.atan2((a**0.5), (1-a)**0.5)
+    # return (R * c)/1000
+
+def get_coords(folder, d):
     '''
-    Constructs a list of latitudes and longitudes from sorted csv files. Coordinates are discarded if they are less than one kilometer apart from their predecessor.
+    Constructs a list of latitudes and longitudes from sorted csv files. Coordinates are discarded if they are less than 'd' kilometers apart from their predecessor.
 
     Parameters
     ----------
@@ -32,6 +46,7 @@ def get_coords(folder):
     Returns
     ------- 
     coords (list): List of comma separated latitudes and longitudes.
+    d (int): Consecutive coordinates must be greater than or equal to d kilometers apart
 
     Notes
 
@@ -51,7 +66,7 @@ def get_coords(folder):
                 new_coord = "{},{}".format(r[1], r[0])
                 if coords != []:
                     # skips row if coordinates are less than a kilometer apart
-                    if distance(coords[-1], new_coord) < 1:
+                    if distance(coords[-1], new_coord) < d:
                         continue
                 coords.append(new_coord)
 
@@ -192,6 +207,41 @@ def check_call_count(n, call_count):
 @click.argument('folder')
 @click.argument('period', type=click.INT)
 @click.argument('max_rep', type=click.INT)
+@click.argument('index', type=click.INT)
+@click.argument('call_type')
+@click.argument('call_count', type=click.INT)
+@click.option('--irr_types', '-i', multiple=True, help="Desired data from call, e.g. GHI ('ghi'), DHI ('dhi'), or DNI ('dni').")
+@click.option('-p', '--paid', type=click.INT, default=0, show_default=True, help='If 0, the free trial Solcast account is used. If 1, the premium Solcast account is used.')
+@click.option('-h', '--hours', type=click.INT, default=168, show_default=True, help='How many hours into the future to make forecasts for (NOTE: Max is 168).')
+def call_from_matlab(folder, index, irr_types, call_type, call_count, paid=0, hours=168):
+    '''
+    Creates a list of coordinates from a folder of csv files and then finds irradiance values for these coordinates from some starting index.
+
+    \b
+    Parameters
+    ----------
+    folder (string): Name of folder containing csvs whose first and second columns are longitudes and latitudes respectively. The csv files must be sorted alphanumerically. 
+    period (int): Period in seconds.
+    max_rep (int): Maximum number of function calls.
+    index (int): The index of the first site in the list of coordinates to make forecasts for.
+    call_type (string): Forecast ('forecasts') or estimated actuals ('estimated_actuals').
+    call_count (int): The number of API calls made since running the script.
+
+    \b
+    Returns
+    -------
+    None
+    '''
+
+    coords = get_coords(folder, 0)
+    call_count = call_to_end(coords, index, irr_types, call_type, call_count, paid = 0, hours = 168)
+
+    click.echo('Done!')
+
+@click.command()
+@click.argument('folder')
+@click.argument('period', type=click.INT)
+@click.argument('max_rep', type=click.INT)
 @click.argument('index_fname')
 @click.argument('call_type')
 @click.argument('call_count', type=click.INT)
@@ -218,7 +268,7 @@ def schedule(folder, period, max_rep, index_fname, irr_types, call_type, call_co
     None
     '''
 
-    coords = get_coords(folder)
+    coords = get_coords(folder, 1)
 
     starttime = time.time()
     while max_rep > 0:
