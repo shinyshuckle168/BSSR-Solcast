@@ -1,4 +1,5 @@
 import math, csv, time, os
+from datetime import datetime, timedelta
 import numpy as np, scipy.stats as st, matplotlib.pyplot as plt
 import requests, click
 from ratelimit import limits
@@ -15,25 +16,25 @@ def distance(coord1, coord2):
     # calculates distance between two latitude-longitude coordinates using the Haversine formula
 
     # coordinates are strings of comma separated latitude and longitude 
-    lat1, long1 = [float(i)*math.pi/180 for i in coord1.split(",")]
-    lat2, long2 = [float(i)*math.pi/180 for i in coord2.split(",")]
+    long1, lat1 = [float(i)*math.pi/180 for i in coord1.split(",")]
+    long2, lat2 = [float(i)*math.pi/180 for i in coord2.split(",")]
 
     r = 6371
     a = (math.sin((lat2-lat1)/2))**2
     b = math.cos(lat1)*math.cos(lat2)*(math.sin((long2-long1)/2))**2
     return 2*r*math.asin((a+b)**0.5)
 
-    # lat1, lon1 = [float(i) for i in coord1.split(",")]
-    # lat2, lon2 = [float(i) for i in coord2.split(",")]
+    lon1, lat1 = [float(i) for i in coord1.split(",")]
+    lon2, lat2 = [float(i) for i in coord2.split(",")]
 
-    # R = 6371e3;                 
-    # phi_1 = lat1 * math.pi/180      
-    # phi_2 = lat2 * math.pi/180
-    # delPhi = (lat2-lat1) * math.pi/180
-    # delLambda = (lon2-lon1) * math.pi/180
-    # a =  ( math.sin(delPhi/2) * math.sin(delPhi/2) ) + ( math.cos(phi_1) * math.cos(phi_2) * math.sin(delLambda/2) * math.sin(delLambda/2) )
-    # c = 2 * math.atan2((a**0.5), (1-a)**0.5)
-    # return (R * c)/1000
+    R = 6371e3;                 
+    phi_1 = lat1 * math.pi/180      
+    phi_2 = lat2 * math.pi/180
+    delPhi = (lat2-lat1) * math.pi/180
+    delLambda = (lon2-lon1) * math.pi/180
+    a =  ( math.sin(delPhi/2) * math.sin(delPhi/2) ) + ( math.cos(phi_1) * math.cos(phi_2) * math.sin(delLambda/2) * math.sin(delLambda/2) )
+    c = 2 * math.atan2((a**0.5), (1-a)**0.5)
+    return (R * c)/1000
 
 def get_coords(folder, d):
     '''
@@ -62,7 +63,14 @@ def get_coords(folder, d):
     for fname in fnames:
         with open(path + "\\" + folder + "\\" + fname, "r", encoding='utf-8-sig') as file:
             reader = csv.reader(file)
+            
+            first = 1
             for r in reader:
+                # skips column names
+                if first:
+                    first = 0
+                    continue
+
                 new_coord = "{},{}".format(r[1], r[0])
                 if coords != []:
                     # skips row if coordinates are less than a kilometer apart
@@ -92,7 +100,6 @@ def call_by_site(lat, long, call_type, paid = 0, hours = 168):
     -------
     call (response object): Forecast or actuals response in JSON format. a
     '''
-
     if paid == 0:
         api_key = 'g7AehjAxhZPilJdO3aEyVRDmTikQAhs4'
     elif paid == 1:
@@ -111,11 +118,10 @@ def call_by_site(lat, long, call_type, paid = 0, hours = 168):
     
     url = 'https://api.solcast.com.au/world_radiation/{}'.format(call_type)
     call = requests.get(url, params=payload, headers=headers)
-    breakpoint()
 
     return call
 
-def call_to_end(coords, index, irr_types, call_type, call_count, paid = 0, hours = 168):
+def call_to_end(coords, start, end, irr_types, call_type, call_count, paid = 0, hours = 168):
     '''
     Finds irradiance values for sites in a list starting from some index and writes these values to csv files in the 'calls' folder. 
 
@@ -135,7 +141,7 @@ def call_to_end(coords, index, irr_types, call_type, call_count, paid = 0, hours
     '''        
     
     # list of coords to end of race
-    coords_new = coords[index:]
+    coords_new = coords[start:end]
         
     call_count_new = check_call_count(len(coords_new), call_count)
 
@@ -159,9 +165,9 @@ def call_to_end(coords, index, irr_types, call_type, call_count, paid = 0, hours
             # first row
             irr_csvWriter.writerow(['latitude', 'longitude'] + time_ls) 
 
-    for i in range(len(coords_new)):    
-        # makes call for each site   
-        call = call_by_site(coords_new[i].split(",")[0], coords_new[i].split(",")[1], call_type, hours).json()[call_type] 
+    for i in range(len(coords_new)):
+        # makes call for each site  
+        call = call_by_site(coords_new[i].split(",")[0], coords_new[i].split(",")[1], call_type, paid, hours).json()[call_type] 
         # writes call data to a different csv for each irr type
         for irr_type in irr_types:
             # file name         
@@ -203,17 +209,38 @@ def check_call_count(n, call_count):
         call_count += n
         return call_count
 
+def day_append(fname):
+    # copies last day's forecast to extend csv by one day.
+    with open(fname, "r", newline = '') as csv_old, open(fname[:-4] + '_appended.csv', "w", newline='') as csv_new:
+        csv_reader = csv.reader(csv_old)
+        csv_writer = csv.writer(csv_new)
+
+        first = 1
+        for row in csv_reader:
+            #csv_writer.writerow(row[:-1] + row[-49:-1])
+            if first:
+                new_row = row
+                for time in row[-49:]:
+                    new_time = datetime.fromisoformat(time[:-5] + '+00:00')+timedelta(days=1)
+                    time_string = new_time.isoformat()[:-6]+'.0000000Z'
+                    new_row.append(time_string)
+                    first = 0
+
+            else:
+                new_row = row + row[-49:]
+
+            csv_writer.writerow(new_row)
+
 @click.command()
 @click.argument('folder')
-@click.argument('period', type=click.INT)
-@click.argument('max_rep', type=click.INT)
-@click.argument('index', type=click.INT)
+@click.argument('start', type=click.INT)
+@click.argument('end', type=click.INT)
 @click.argument('call_type')
 @click.argument('call_count', type=click.INT)
 @click.option('--irr_types', '-i', multiple=True, help="Desired data from call, e.g. GHI ('ghi'), DHI ('dhi'), or DNI ('dni').")
 @click.option('-p', '--paid', type=click.INT, default=0, show_default=True, help='If 0, the free trial Solcast account is used. If 1, the premium Solcast account is used.')
 @click.option('-h', '--hours', type=click.INT, default=168, show_default=True, help='How many hours into the future to make forecasts for (NOTE: Max is 168).')
-def call_from_matlab(folder, index, irr_types, call_type, call_count, paid=0, hours=168):
+def call_from_matlab(folder, start, end, irr_types, call_type, call_count, paid=0, hours=168):
     '''
     Creates a list of coordinates from a folder of csv files and then finds irradiance values for these coordinates from some starting index.
 
@@ -234,8 +261,7 @@ def call_from_matlab(folder, index, irr_types, call_type, call_count, paid=0, ho
     '''
 
     coords = get_coords(folder, 0)
-    call_count = call_to_end(coords, index, irr_types, call_type, call_count, paid = 0, hours = 168)
-
+    call_count = call_to_end(coords, start, end, irr_types, call_type, call_count, paid, hours)
     click.echo('Done!')
 
 @click.command()
@@ -273,11 +299,13 @@ def schedule(folder, period, max_rep, index_fname, irr_types, call_type, call_co
     starttime = time.time()
     while max_rep > 0:
         with open(index_fname, 'r') as index_file:
-            index =  int(index_file.readline())
+            start =  int(index_file.readline())
+            end = int(index_file.readline())
 
-        call_count = call_to_end(coords, index, irr_types, call_type, call_count, paid = 0, hours = 168)
+        call_count = call_to_end(coords, start, end, irr_types, call_type, call_count, paid = 0, hours = 168)
 
         time.sleep(period - ((time.time() - starttime) % period))
         max_rep -= 1
 
     click.echo('Done!')
+
